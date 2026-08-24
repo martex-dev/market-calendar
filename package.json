@@ -8,7 +8,8 @@
 		"start": "next start",
 		"lint": "eslint",
 		"refresh": "node --env-file-if-exists=.env.local --import tsx scripts/refresh.ts",
-		"artifact": "node --env-file-if-exists=.env.local --import tsx scripts/export-artifact.ts"
+		"artifact": "node --env-file-if-exists=.env.local --import tsx scripts/export-artifact.ts",
+		"doctor": "node --env-file-if-exists=.env.local --import tsx scripts/doctor.ts"
 	},
 	"dependencies": {
 		"@libsql/client": "^0.17.4",
