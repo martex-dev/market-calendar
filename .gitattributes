@@ -1,0 +1,3 @@
+# Normalise line endings so the repo is identical on Windows and Vercel's Linux builders.
+* text=auto eol=lf
+*.ico binary
