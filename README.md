@@ -1,5 +1,7 @@
 # Market Calendar
 
+**Live:** https://market-calendar-three.vercel.app
+
 One day-by-day calendar of everything that could move US stocks: macro
 releases and index-constituent earnings, merged into a single ranked list.
 
@@ -67,7 +69,12 @@ These are deliberate, not oversights:
    The local SQLite fallback cannot work on Vercel — serverless filesystems
    are ephemeral.
 2. Set `FRED_API_KEY` and `CRON_SECRET` in project settings.
-3. `vercel.json` already declares the cron job (`/api/cron/refresh`, 06:00
+3. Turn off **Settings -> Deployment Protection -> Vercel Authentication**.
+   New Vercel projects enable it by default, which puts the whole site
+   (including the cron route) behind a Vercel login wall — the deploy looks
+   successful but every request 302s to `vercel.com/sso-api`. Set it to
+   "Only Preview Deployments", or Disabled on Hobby.
+4. `vercel.json` already declares the cron job (`/api/cron/refresh`, 06:00
    daily). Vercel sends `Authorization: Bearer $CRON_SECRET` automatically
    once that variable exists.
 
