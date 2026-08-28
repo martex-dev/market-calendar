@@ -21,6 +21,12 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { db } from '../src/lib/db/client';
+import { getMarketNews, type NewsResult } from '../src/lib/news';
+import { rankNews } from '../src/lib/news/rank';
+import { TOPICS } from '../src/lib/news/topics';
+import { getBellwetherQuotes, type QuotesResult } from '../src/lib/quotes';
+import { eventDetail } from '../src/lib/rationale';
+import { FOMC_EVENT_TYPE, MACRO_RELEASE_TYPES } from '../src/lib/impact';
 import type { MarketEvent } from '../src/lib/types';
 import { todayET } from '../src/lib/time';
 
@@ -66,6 +72,104 @@ async function loadEvents(): Promise<MarketEvent[]> {
 	}));
 }
 
+/**
+ * The impact rationales, keyed the way the runtime can look them up.
+ *
+ * Embedded per TYPE rather than per event: there are 9 macro types and one
+ * earnings rule, against several hundred rows. Expanding it per row would add
+ * a couple of hundred kilobytes of identical prose to a file people share.
+ *
+ * The text comes from eventDetail() rather than being retyped here, so the
+ * artifact cannot drift from src/lib/impact.ts.
+ */
+function buildDetails(): Record<string, unknown> {
+	const out: Record<string, unknown> = {};
+
+	for (const type of [...MACRO_RELEASE_TYPES, FOMC_EVENT_TYPE]) {
+		const probe: MarketEvent = {
+			id: `macro:2026-01-01:${type.key}`,
+			kind: 'macro',
+			date: '2026-01-01',
+			etMinutes: type.etMinutes,
+			session: type.session,
+			title: type.title,
+			impact: type.impact,
+			symbol: null,
+			forecast: null,
+			previous: null,
+			source: type.key === FOMC_EVENT_TYPE.key ? 'federalreserve' : 'fred',
+		};
+		const d = eventDetail(probe);
+		out[type.key] = {
+			rationale: d.rationale,
+			sourceUrl: d.sourceUrl,
+			notes: d.notes,
+		};
+	}
+
+	// One earnings entry covers every ticker: the rule is a market-cap table,
+	// not a per-company judgement. The runtime fills in the NASDAQ link.
+	const earningsProbe: MarketEvent = {
+		id: 'earnings:2026-01-01:aapl',
+		kind: 'earnings',
+		date: '2026-01-01',
+		etMinutes: 7 * 60,
+		session: 'premarket',
+		title: 'Probe',
+		impact: 'High',
+		symbol: 'AAPL',
+		forecast: null,
+		previous: null,
+		source: 'nasdaq',
+	};
+	const timed = eventDetail(earningsProbe);
+	const untimed = eventDetail({ ...earningsProbe, etMinutes: null });
+	out.__earnings__ = {
+		rationale: timed.rationale,
+		notes: timed.notes,
+		// The extra line for rows NASDAQ gave no time for, appended by the
+		// runtime rather than duplicating the whole block.
+		notesNoTime: untimed.notes.slice(timed.notes.length),
+	};
+
+	return out;
+}
+
+/**
+ * Headlines, captured at export time.
+ *
+ * Never fatal. `npm run artifact` has to keep working with no network — the
+ * calendar is the deliverable and the rail is the garnish, so a failed fetch
+ * costs you the rail and nothing else.
+ */
+async function loadNews(events: MarketEvent[]): Promise<NewsResult> {
+	try {
+		return await getMarketNews({ events, limit: 40 });
+	} catch (err) {
+		console.warn(`  news:     skipped (${String(err).slice(0, 120)})`);
+		return { items: [], failed: [], fetchedAt: new Date().toISOString(), symbolDates: {} };
+	}
+}
+
+/**
+ * Quotes, captured at export time.
+ *
+ * These go into the artifact as a FROZEN snapshot and are labelled as one.
+ * That is the honest treatment: the clock and the countdown in this file stay
+ * live because they are computed from the reader's own clock, but a price
+ * cannot be recomputed from anything the file knows. Showing a stale number
+ * with a live-looking beacon would be the one genuinely misleading thing this
+ * export could do.
+ */
+async function loadQuotes(): Promise<QuotesResult> {
+	try {
+		return await getBellwetherQuotes();
+	} catch (err) {
+		console.warn(`  quotes:   skipped (${String(err).slice(0, 120)})`);
+		return { quotes: [], marketStatus: null, failed: [], fetchedAt: '' };
+	}
+}
+
 /** Safe to drop inside a <script> block. */
 function embed(value: unknown): string {
 	// U+2028 / U+2029 are valid JSON but illegal raw in a script body, and
@@ -85,6 +189,8 @@ async function main(): Promise<void> {
 		);
 	}
 
+	const news = await loadNews(events);
+	const quotes = await loadQuotes();
 	const css = readFileSync(join(ROOT, 'src/app/globals.css'), 'utf8');
 	const runtime = readFileSync(join(ROOT, 'scripts/artifact-runtime.js'), 'utf8');
 	const today = todayET();
@@ -109,7 +215,23 @@ async function main(): Promise<void> {
 
 ${css}
 
-/* Artifact-only additions: the snapshot banner and the empty state. */
+/* Artifact-only additions: the snapshot banner, the frozen board, and the
+   empty state. */
+
+/*
+ * A frozen quote board must not look live. The beacon holds still and the
+ * status reads grey rather than green, whatever session the market happened
+ * to be in when this file was written.
+ */
+.bw.phase-frozen .bw-phase {
+	color: var(--dim);
+}
+
+.bw.phase-frozen .bw-beacon {
+	animation: none;
+	opacity: 0.5;
+}
+
 .snapshot {
 	display: flex;
 	flex-wrap: wrap;
@@ -179,13 +301,14 @@ ${css}
 }
 </style>
 
-<div class="ticker"><div class="ticker-inner" id="ticker"></div></div>
+<div id="board"></div>
+<div class="ticker" id="ticker"></div>
 
 <div class="wrap">
 	<header class="site">
 		<div>
 			<h1><span class="brandmark mono">MC</span>Market Calendar</h1>
-			<p class="tag">Macro releases and index-constituent earnings, merged into one timeline and ranked by impact.</p>
+			<p class="tag">Macro releases, index-constituent earnings, and the economic news around them &mdash; one timeline, ranked by impact.</p>
 		</div>
 		<div class="legend">
 			<span><i style="background:var(--macro)"></i>Macro</span>
@@ -197,9 +320,13 @@ ${css}
 	</header>
 
 	<div class="snapshot">
-		<span><b>Snapshot.</b> Data captured ${today}. This shared copy does not refresh &mdash; the live site does.</span>
+		<span><b>Snapshot.</b> Data captured ${today}. This shared copy does not refresh &mdash; the live site does. <b>Prices are frozen</b> at export time.</span>
 		<span>Covering <span class="mono">${coverage.first}</span> to <span class="mono">${coverage.last}</span>, <span class="mono">${events.length}</span> events.</span>
-		<span class="kbd">&larr; &rarr; to move weeks</span>
+		<span class="kbd">&larr; &rarr; weeks</span>
+		<span class="kbd">t today</span>
+		<span class="kbd">w / d view</span>
+		<span class="kbd">/ filter</span>
+		<span>Click any row for its impact rationale and source.</span>
 	</div>
 
 	<div class="toolbar">
@@ -223,11 +350,13 @@ ${css}
 		</div>
 	</div>
 
+	<div class="desk" id="desk"></div>
+
 	<main id="days"></main>
 
 	<footer class="site">
-		<div><strong>Sources.</strong> Macro release dates from FRED (St.&nbsp;Louis Fed) <span class="mono">release/dates</span>. FOMC decision dates from federalreserve.gov. Earnings from NASDAQ's public calendar, filtered to S&amp;P&nbsp;500 and Nasdaq-100 constituents.</div>
-		<div><strong>Read the stamps.</strong> Every row carries the source it came from. Times are scheduled, not guaranteed. Macro rows have no forecast because FRED publishes no consensus estimates.</div>
+		<div><strong>Sources.</strong> Macro release dates from FRED (St.&nbsp;Louis Fed) <span class="mono">release/dates</span>. FOMC decision dates from federalreserve.gov. Earnings and quotes from NASDAQ's public API, filtered to S&amp;P&nbsp;500 and Nasdaq-100 constituents. Headlines from six public RSS feeds &mdash; the Federal Reserve, BEA and Census directly, plus CNBC and MarketWatch. Index tiles quote the tracking ETF, because NASDAQ's quote API carries only its own indices and only end-of-day.</div>
+		<div><strong>Read the stamps.</strong> Every row and every headline carries the source it came from, and agency releases are stamped apart from wire coverage. Open any row for the impact rationale verbatim. Times are scheduled, not guaranteed. Macro rows have no forecast because FRED publishes no consensus estimates.</div>
 		<div><strong>Known gaps.</strong> ISM PMI is absent: ISM had all its series removed from FRED in 2016, so there is no free path to it. Historical earnings rows show no time because NASDAQ only supplies it for upcoming dates.</div>
 		<div>Not investment advice. Informational use only.</div>
 	</footer>
@@ -235,6 +364,20 @@ ${css}
 
 <script>
 window.__EVENTS__ = ${embed(events)};
+window.__NEWS__ = ${embed({ items: news.items, symbolDates: news.symbolDates })};
+window.__HOT__ = ${embed(
+		(() => {
+			// The lead is scored HERE, not in the runtime: the ranking rule lives
+			// in src/lib/news/rank.ts and porting it to the artifact would be a
+			// second copy free to disagree with the site. A snapshot only needs
+			// the answer.
+			const top = rankNews(news.items, Date.parse(news.fetchedAt) || 0)[0];
+			return top ? { id: top.item.id, reasons: top.reasons } : null;
+		})(),
+	)};
+window.__QUOTES__ = ${embed(quotes)};
+window.__DETAILS__ = ${embed(buildDetails())};
+window.__TOPICS__ = ${embed(TOPICS.map((t) => ({ key: t.key, label: t.label, eventKeys: t.eventKeys })))};
 window.__TODAY__ = ${embed(today)};
 </script>
 <script>
@@ -248,6 +391,8 @@ ${runtime}
 	console.log(`wrote ${OUT_FILE}`);
 	console.log(`  events:   ${events.length}`);
 	console.log(`  coverage: ${coverage.first} -> ${coverage.last}`);
+	console.log(`  news:     ${news.items.length} headlines`);
+	console.log(`  quotes:   ${quotes.quotes.length} instruments (${quotes.marketStatus ?? 'unknown'})`);
 	console.log(`  size:     ${(Buffer.byteLength(html) / 1024).toFixed(0)} KB`);
 }
 

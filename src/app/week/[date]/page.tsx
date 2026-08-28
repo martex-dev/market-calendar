@@ -1,7 +1,8 @@
 import { notFound } from 'next/navigation';
-import DayList from '@/components/DayList';
+import CalendarView from '@/components/CalendarView';
+import StatBand from '@/components/StatBand';
 import Toolbar from '@/components/Toolbar';
-import { getEventsInRange, groupByDate } from '@/lib/db/events';
+import { getEventsInRange, getUpcomingHighImpact } from '@/lib/db/events';
 import {
 	addDays,
 	formatDayHeading,
@@ -36,11 +37,26 @@ export default async function WeekPage({
 	const today = todayET();
 
 	// One range query returns macro and earnings already interleaved.
-	const events = await getEventsInRange(days[0], days[6]);
-	const byDate = groupByDate(events, days);
+	// The countdown target is looked up separately from `today` rather than
+	// from this week's rows, so paging back to March still counts down to the
+	// next real event instead of one that has already happened.
+	const [events, upcoming] = await Promise.all([
+		getEventsInRange(days[0], days[6]),
+		getUpcomingHighImpact(today, 1).catch(() => []),
+	]);
 
 	const qs = mode === 'local' ? '?tz=local' : '';
 	const label = `${formatDayHeading(days[0]).replace(/^\w+, /, '').replace(/, \d{4}$/, '')} – ${formatDayHeading(days[6]).replace(/^\w+, /, '')}`;
+
+	const macro = events.filter((e) => e.kind === 'macro').length;
+
+	const nav = {
+		prev: `/week/${addDays(monday, -7)}${qs}`,
+		next: `/week/${addDays(monday, 7)}${qs}`,
+		today: `/week/${today}${qs}`,
+		week: `/week/${monday}${qs}`,
+		day: `/day/${today >= days[0] && today <= days[6] ? today : days[0]}${qs}`,
+	};
 
 	return (
 		<>
@@ -48,15 +64,26 @@ export default async function WeekPage({
 				view='week'
 				label={label}
 				mode={mode}
-				prevHref={`/week/${addDays(monday, -7)}${qs}`}
-				nextHref={`/week/${addDays(monday, 7)}${qs}`}
-				todayHref={`/week/${today}${qs}`}
-				weekHref={`/week/${monday}${qs}`}
-				dayHref={`/day/${today >= days[0] && today <= days[6] ? today : days[0]}${qs}`}
+				prevHref={nav.prev}
+				nextHref={nav.next}
+				todayHref={nav.today}
+				weekHref={nav.week}
+				dayHref={nav.day}
 				modeHrefs={{
 					ET: `/week/${monday}`,
 					local: `/week/${monday}?tz=local`,
 				}}
+			/>
+
+			<StatBand
+				scopeLabel='This week'
+				counts={{
+					total: events.length,
+					high: events.filter((e) => e.impact === 'High').length,
+					macro,
+					earnings: events.length - macro,
+				}}
+				nextHigh={upcoming[0] ?? null}
 			/>
 
 			{events.length === 0 && (
@@ -67,15 +94,13 @@ export default async function WeekPage({
 				</p>
 			)}
 
-			{days.map((d) => (
-				<DayList
-					key={d}
-					date={d}
-					events={byDate.get(d) ?? []}
-					mode={mode}
-					isToday={d === today}
-				/>
-			))}
+			<CalendarView
+				days={days}
+				events={events}
+				mode={mode}
+				today={today}
+				nav={nav}
+			/>
 		</>
 	);
 }

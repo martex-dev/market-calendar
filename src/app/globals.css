@@ -10,10 +10,18 @@
  *   IMPACT  -> red / amber / grey     (how much this can move the market)
  *   KIND    -> blue / green           (macro release vs company earnings)
  * Impact owns the loud colours because it is the ranking the product is for.
+ *
+ * A third axis arrived with the news desk - TIER (issuer vs wire) - and it is
+ * given no hue at all, only a solid vs dashed stamp border. A fourth, PRICE
+ * DIRECTION on the quote board, reuses the up-green down-red convention but
+ * spends it on a 2px top edge rather than on tinted text, so it cannot be
+ * mistaken for the impact scale. Three competing colour scales at full
+ * strength is where a dense layout stops being readable, so each new
+ * distinction takes a quieter treatment than the last.
  */
 
 :root {
-	--bg: #0b0e11;
+	--bg: #0a0d11;
 	--panel: #141821;
 	--panel-alt: #10141b;
 	--panel-hover: #182030;
@@ -37,6 +45,8 @@
 
 	--up: #5fbf77;
 	--down: #e05c5c;
+
+	--radius: 6px;
 }
 
 * {
@@ -56,12 +66,22 @@ body {
 	font-size: 14px;
 	line-height: 1.45;
 	-webkit-font-smoothing: antialiased;
-	/* Faint grid, like a plotting surface. Sits behind everything. */
+	/*
+	 * Faint plotting grid, plus one warm bloom behind the masthead so the top
+	 * of the page has a light source. Both are fixed: the grid must not slide
+	 * under a scrolling list, or the page reads as moving when it is still.
+	 */
 	background-image:
+		radial-gradient(
+			900px 380px at 50% -180px,
+			rgba(255, 176, 32, 0.07),
+			transparent 70%
+		),
 		linear-gradient(var(--border-soft) 1px, transparent 1px),
 		linear-gradient(90deg, var(--border-soft) 1px, transparent 1px);
-	background-size: 64px 64px;
-	background-position: -1px -1px;
+	background-size: 100% 100%, 64px 64px, 64px 64px;
+	background-position: 0 0, -1px -1px, -1px -1px;
+	background-attachment: fixed;
 }
 
 .mono {
@@ -75,87 +95,399 @@ a {
 	text-decoration: none;
 }
 
-/* ------------------------------- Ticker strip ----------------------------- */
+button {
+	font: inherit;
+	color: inherit;
+}
+
+:focus-visible {
+	outline: 2px solid var(--medium);
+	outline-offset: 2px;
+	border-radius: 3px;
+}
+
+/* ============================ Bellwethers board =========================== */
+
+/*
+ * The quote board. This is the only part of the page pinned to the viewport,
+ * because it is the only part whose value is "what is true right now".
+ */
+.bw {
+	display: flex;
+	align-items: stretch;
+	position: sticky;
+	top: 0;
+	z-index: 50;
+	background: var(--panel);
+	border-bottom: 1px solid var(--border);
+	overflow: hidden;
+}
+
+.bw-status {
+	flex: none;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	gap: 1px;
+	padding: 6px 14px;
+	border-right: 1px solid var(--border);
+	background: var(--panel-alt);
+	min-width: 132px;
+}
+
+.bw-phase {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 9.5px;
+	font-weight: 700;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--dim);
+	white-space: nowrap;
+}
+
+.bw-beacon {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: currentColor;
+	flex: none;
+}
+
+.bw.phase-open .bw-phase {
+	color: var(--earnings);
+}
+
+/* The beacon only breathes while the market is actually open. An animation
+   that never stops stops carrying information. */
+.bw.phase-open .bw-beacon {
+	animation: beacon 2.4s ease-out infinite;
+}
+
+.bw.phase-pre .bw-phase,
+.bw.phase-after .bw-phase {
+	color: var(--medium);
+}
+
+@keyframes beacon {
+	0% {
+		box-shadow: 0 0 0 0 rgba(95, 191, 119, 0.5);
+	}
+	70% {
+		box-shadow: 0 0 0 7px rgba(95, 191, 119, 0);
+	}
+	100% {
+		box-shadow: 0 0 0 0 rgba(95, 191, 119, 0);
+	}
+}
+
+.bw-time {
+	font-size: 11px;
+	color: var(--muted);
+	letter-spacing: 0.02em;
+	min-height: 16px;
+}
+
+.bw-rail {
+	display: flex;
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow-x: auto;
+	scrollbar-width: none;
+}
+
+.bw-rail::-webkit-scrollbar {
+	display: none;
+}
+
+.bw-tile {
+	flex: none;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	gap: 2px;
+	min-width: 118px;
+	padding: 6px 14px;
+	border: none;
+	border-right: 1px solid var(--border-soft);
+	/* The direction colour arrives as a top edge rather than as tinted text:
+	   at this density a whole tile of red or green would fight the impact
+	   scale below it, which owns those hues for a different meaning. */
+	border-top: 2px solid transparent;
+	background: transparent;
+	text-align: left;
+	cursor: pointer;
+	transition: background 0.12s ease;
+}
+
+.bw-tile:hover {
+	background: var(--panel-hover);
+}
+
+/* Index tiles are read-outs, not controls. See the note in the component. */
+.bw-tile.is-static {
+	cursor: default;
+}
+
+.bw-tile.is-static:hover {
+	background: transparent;
+}
+
+.bw-tile.on {
+	background: var(--panel-hover);
+	box-shadow: inset 0 -2px 0 var(--medium);
+}
+
+/* A hairline gap where indices end and single names begin. */
+.bw-tile.is-group-start {
+	border-left: 1px solid var(--border);
+	margin-left: 6px;
+}
+
+.bw-tile.dir-up {
+	border-top-color: var(--up);
+}
+
+.bw-tile.dir-down {
+	border-top-color: var(--down);
+}
+
+.bw-head {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+}
+
+.bw-sym {
+	font-size: 11px;
+	font-weight: 700;
+	color: var(--text);
+	letter-spacing: 0.02em;
+}
+
+.bw-label {
+	font-size: 9px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--dim);
+	white-space: nowrap;
+}
+
+.bw-nums {
+	display: flex;
+	align-items: baseline;
+	gap: 7px;
+}
+
+.bw-price {
+	font-size: 12.5px;
+	color: var(--text);
+}
+
+.bw-pct {
+	font-size: 11px;
+	font-weight: 600;
+}
+
+.dir-up .bw-pct {
+	color: var(--up);
+}
+
+.dir-down .bw-pct {
+	color: var(--down);
+}
+
+.bw-session {
+	font-size: 9px;
+	letter-spacing: 0.04em;
+	color: var(--dim);
+}
+
+.bw-session.dir-up {
+	color: rgba(95, 191, 119, 0.75);
+}
+
+.bw-session.dir-down {
+	color: rgba(224, 92, 92, 0.75);
+}
+
+.bw-refresh {
+	flex: none;
+	width: 32px;
+	border: none;
+	border-left: 1px solid var(--border);
+	background: var(--panel-alt);
+	color: var(--dim);
+	font-size: 12px;
+	cursor: pointer;
+	transition: color 0.12s ease, background 0.12s ease;
+}
+
+.bw-refresh:hover:not(:disabled) {
+	color: var(--text);
+	background: var(--panel-hover);
+}
+
+.bw-refresh:disabled {
+	cursor: default;
+	opacity: 0.5;
+}
+
+/* ============================== Ticker strip ============================== */
 
 .ticker {
+	display: flex;
+	align-items: stretch;
 	border-bottom: 1px solid var(--border);
 	background: var(--panel-alt);
 	overflow: hidden;
 	white-space: nowrap;
 }
 
-.ticker-inner {
-	display: flex;
-	align-items: stretch;
-	gap: 0;
-	overflow-x: auto;
-	scrollbar-width: none;
-}
-
-.ticker-inner::-webkit-scrollbar {
-	display: none;
-}
-
-.ticker-label {
+.mq-label {
 	flex: none;
 	display: flex;
 	align-items: center;
 	gap: 7px;
 	padding: 0 14px;
-	background: var(--high);
-	color: #0b0e11;
-	font-size: 10px;
+	border-right: 1px solid var(--border);
+	font-size: 9.5px;
 	font-weight: 700;
-	letter-spacing: 0.12em;
+	letter-spacing: 0.14em;
 	text-transform: uppercase;
+	color: var(--dim);
 }
 
-.ticker-dot {
-	width: 6px;
-	height: 6px;
+.mq-label-dot {
+	width: 5px;
+	height: 5px;
 	border-radius: 50%;
-	background: #0b0e11;
-	animation: pulse 2s ease-in-out infinite;
+	background: var(--medium);
+	animation: pulse 2.4s ease-in-out infinite;
 }
 
-@keyframes pulse {
-	0%,
-	100% {
-		opacity: 1;
+/* --------------------------------- marquee -------------------------------- */
+
+.mq {
+	position: relative;
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	/* Fade the ends so items enter and leave rather than being chopped. */
+	mask-image: linear-gradient(
+		90deg,
+		transparent,
+		#000 26px,
+		#000 calc(100% - 58px),
+		transparent
+	);
+}
+
+/*
+ * The track holds the entry list twice and translates by exactly -50%, so at
+ * the end of a cycle the clone sits where the original started and the loop
+ * has no seam. `width: max-content` keeps the two runs on one line however
+ * long the content is.
+ */
+.mq-track {
+	display: flex;
+	width: max-content;
+	animation: marquee var(--mq-duration, 60s) linear infinite;
+	will-change: transform;
+}
+
+.mq-run {
+	display: flex;
+	align-items: stretch;
+}
+
+.mq.is-paused .mq-track,
+.mq:hover .mq-track {
+	animation-play-state: paused;
+}
+
+@keyframes marquee {
+	from {
+		transform: translate3d(0, 0, 0);
 	}
-	50% {
-		opacity: 0.25;
+	to {
+		transform: translate3d(-50%, 0, 0);
 	}
 }
 
-.ticker-item {
+.mq-item {
 	flex: none;
 	display: flex;
 	align-items: baseline;
 	gap: 8px;
-	padding: 7px 16px;
+	padding: 8px 18px;
 	border-right: 1px solid var(--border-soft);
 	font-size: 12px;
 }
 
-.ticker-date {
+.mq-item.is-link:hover .mq-text {
+	color: #fff;
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+
+.mq-lead {
+	font-size: 10px;
+	letter-spacing: 0.06em;
 	color: var(--dim);
-	font-size: 11px;
 }
 
-.ticker-name {
+.mq-lead.tone-high {
+	color: var(--high);
+}
+
+.mq-item.is-news .mq-lead {
+	color: var(--macro);
+}
+
+.mq-text {
 	color: var(--text);
+	transition: color 0.12s ease;
 }
 
-.ticker-in {
+.mq-item.is-news .mq-text {
+	color: var(--muted);
+}
+
+.mq-trail {
+	font-size: 10.5px;
 	color: var(--medium);
-	font-size: 11px;
 }
 
-/* --------------------------------- Header --------------------------------- */
+.mq-item.is-news .mq-trail {
+	color: var(--dim);
+}
+
+.mq-toggle {
+	position: absolute;
+	right: 0;
+	top: 0;
+	bottom: 0;
+	width: 34px;
+	border: none;
+	border-left: 1px solid var(--border);
+	background: var(--panel-alt);
+	color: var(--dim);
+	font-size: 9px;
+	cursor: pointer;
+	transition: color 0.12s ease, background 0.12s ease;
+}
+
+.mq-toggle:hover {
+	color: var(--text);
+	background: var(--panel-hover);
+}
+
+/* =============================== Masthead ================================= */
 
 .wrap {
-	max-width: 1180px;
+	max-width: 1480px;
 	margin: 0 auto;
 	padding: 0 20px 72px;
 }
@@ -166,16 +498,16 @@ header.site {
 	justify-content: space-between;
 	gap: 16px;
 	flex-wrap: wrap;
-	padding: 22px 0 16px;
+	padding: 24px 0 16px;
 	border-bottom: 1px solid var(--border);
 	margin-bottom: 18px;
 }
 
 header.site h1 {
 	margin: 0;
-	font-size: 17px;
+	font-size: 18px;
 	font-weight: 650;
-	letter-spacing: -0.01em;
+	letter-spacing: -0.015em;
 	display: flex;
 	align-items: center;
 	gap: 10px;
@@ -185,20 +517,22 @@ header.site h1 {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 22px;
-	height: 22px;
+	width: 24px;
+	height: 24px;
 	border: 1px solid var(--medium);
 	color: var(--medium);
 	font-size: 11px;
 	font-weight: 700;
 	border-radius: 3px;
+	background: var(--medium-bg);
+	box-shadow: 0 0 18px rgba(255, 176, 32, 0.18);
 }
 
 header.site .tag {
-	margin: 3px 0 0;
+	margin: 4px 0 0;
 	color: var(--muted);
 	font-size: 12px;
-	max-width: 52ch;
+	max-width: 62ch;
 }
 
 .legend {
@@ -223,7 +557,7 @@ header.site .tag {
 	display: block;
 }
 
-/* -------------------------------- Toolbar --------------------------------- */
+/* ================================ Toolbar ================================= */
 
 .toolbar {
 	display: flex;
@@ -231,7 +565,7 @@ header.site .tag {
 	gap: 10px;
 	align-items: center;
 	justify-content: space-between;
-	margin-bottom: 16px;
+	margin-bottom: 12px;
 }
 
 .group {
@@ -279,12 +613,272 @@ header.site .tag {
 	padding-left: 4px;
 }
 
-/* --------------------------------- Day card ------------------------------- */
+/* =============================== Stat band ================================ */
+
+.band {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 12px 16px;
+	margin-bottom: 14px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background:
+		linear-gradient(180deg, rgba(255, 176, 32, 0.05), transparent 60%),
+		var(--panel);
+}
+
+.band-next {
+	display: flex;
+	align-items: baseline;
+	gap: 10px;
+	min-width: 0;
+	flex-wrap: wrap;
+}
+
+.band-k {
+	font-size: 9.5px;
+	letter-spacing: 0.13em;
+	text-transform: uppercase;
+	color: var(--dim);
+}
+
+.band-title {
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--text);
+}
+
+.band-none {
+	font-weight: 400;
+	color: var(--muted);
+}
+
+.cd {
+	font-size: 15px;
+	font-weight: 700;
+	color: var(--medium);
+	letter-spacing: 0.02em;
+	text-shadow: 0 0 22px rgba(255, 176, 32, 0.35);
+}
+
+.cd-d {
+	color: var(--text);
+}
+
+.cd.is-live {
+	color: var(--high);
+	text-shadow: 0 0 22px rgba(255, 92, 92, 0.4);
+}
+
+.band-stats {
+	display: flex;
+	gap: 22px;
+}
+
+.band-stat {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+}
+
+.band-n {
+	font-size: 19px;
+	font-weight: 700;
+	line-height: 1.05;
+	color: var(--text);
+}
+
+.band-stat.is-high .band-n {
+	color: var(--high);
+}
+
+.band-stat.is-macro .band-n {
+	color: var(--macro);
+}
+
+.band-stat.is-earnings .band-n {
+	color: var(--earnings);
+}
+
+/* ================================ Filters ================================= */
+
+.filters {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	padding: 9px 10px;
+	margin-bottom: 12px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--panel-alt);
+	position: sticky;
+	/*
+	 * Clears the sticky quote board above it. The wire ticker scrolls away;
+	 * only the live prices stay pinned.
+	 *
+	 * --board-h is measured and published by BellwetherStrip, because the
+	 * board is a line taller outside regular hours. The fallback matches the
+	 * regular-hours height, so this is still correct before hydration and if
+	 * the board fails to render at all.
+	 */
+	top: var(--board-h, 47px);
+	z-index: 20;
+	backdrop-filter: blur(8px);
+}
+
+.search {
+	position: relative;
+	display: flex;
+	align-items: center;
+	flex: 1 1 210px;
+	min-width: 170px;
+}
+
+.search-icon {
+	position: absolute;
+	left: 9px;
+	color: var(--dim);
+	font-size: 13px;
+	pointer-events: none;
+}
+
+.search input {
+	width: 100%;
+	padding: 6px 34px 6px 26px;
+	font: inherit;
+	font-size: 12.5px;
+	color: var(--text);
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: 5px;
+	transition: border-color 0.12s ease;
+}
+
+.search input::placeholder {
+	color: var(--dim);
+}
+
+.search input:focus {
+	outline: none;
+	border-color: var(--medium);
+}
+
+.search input::-webkit-search-cancel-button {
+	filter: invert(0.6);
+}
+
+.search kbd {
+	position: absolute;
+	right: 8px;
+	font-size: 10px;
+	color: var(--dim);
+	border: 1px solid var(--border);
+	border-radius: 3px;
+	padding: 0 4px;
+	pointer-events: none;
+}
+
+.search input:focus + kbd {
+	opacity: 0;
+}
+
+.fset {
+	display: flex;
+	gap: 4px;
+}
+
+/*
+ * Filter chips read as ON by default and dim when switched off, which is the
+ * opposite of the usual "highlight the selection" pattern. It is the right
+ * way round here: the default state is everything visible, so the thing worth
+ * signalling is what you have TURNED OFF.
+ */
+.fchip {
+	padding: 4px 10px;
+	font-size: 11px;
+	letter-spacing: 0.04em;
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	background: transparent;
+	color: var(--dim);
+	cursor: pointer;
+	transition: all 0.12s ease;
+}
+
+.fchip:hover {
+	border-color: var(--muted);
+	color: var(--text);
+}
+
+.fchip.on {
+	color: var(--text);
+	background: var(--panel-hover);
+}
+
+.fchip.kind-macro.on {
+	border-color: rgba(74, 157, 224, 0.55);
+	box-shadow: inset 2px 0 0 var(--macro);
+}
+
+.fchip.kind-earnings.on {
+	border-color: rgba(95, 191, 119, 0.55);
+	box-shadow: inset 2px 0 0 var(--earnings);
+}
+
+.fchip.imp-High.on {
+	border-color: rgba(255, 92, 92, 0.5);
+	color: var(--high);
+}
+
+.fchip.imp-Medium.on {
+	border-color: rgba(255, 176, 32, 0.5);
+	color: var(--medium);
+}
+
+.fchip.imp-Low.on {
+	border-color: rgba(125, 135, 152, 0.45);
+	color: var(--low);
+}
+
+.fcount {
+	margin-left: auto;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 12px;
+	color: var(--text);
+}
+
+.fcount span {
+	color: var(--dim);
+}
+
+.freset {
+	border: 1px solid var(--border);
+	background: transparent;
+	color: var(--medium);
+	font-size: 10px;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	padding: 2px 7px;
+	border-radius: 3px;
+	cursor: pointer;
+}
+
+.freset:hover {
+	background: var(--medium-bg);
+}
+
+/* ================================ Day card ================================ */
 
 .day {
 	border: 1px solid var(--border);
 	background: var(--panel);
-	border-radius: 6px;
+	border-radius: var(--radius);
 	margin-bottom: 10px;
 	overflow: hidden;
 }
@@ -302,6 +896,7 @@ header.site .tag {
 .day.is-empty .day-head {
 	padding-top: 5px;
 	padding-bottom: 5px;
+	border-bottom: none;
 }
 
 .day.is-empty .day-full {
@@ -319,15 +914,12 @@ header.site .tag {
 	border-bottom: 1px solid var(--border);
 }
 
-.day.is-empty .day-head {
-	border-bottom: none;
-}
-
 .day-date {
 	display: flex;
 	align-items: baseline;
 	gap: 9px;
 	font-size: 12px;
+	margin: 0;
 }
 
 .day-dow {
@@ -340,6 +932,10 @@ header.site .tag {
 .day-full {
 	color: var(--text);
 	font-weight: 550;
+}
+
+.day.today {
+	border-color: rgba(255, 176, 32, 0.35);
 }
 
 .day.today .day-head {
@@ -382,26 +978,40 @@ header.site .tag {
 	display: block;
 }
 
-/* ---------------------------------- Rows ---------------------------------- */
+/* ================================== Rows ================================== */
 
 .rows {
 	display: flex;
 	flex-direction: column;
 }
 
-.row {
-	display: grid;
-	grid-template-columns: 92px 74px minmax(0, 1fr) 118px 118px 96px;
-	align-items: center;
-	gap: 12px;
-	padding: 9px 14px 9px 11px;
+.row-wrap {
 	border-bottom: 1px solid var(--border-soft);
-	border-left: 3px solid transparent;
-	transition: background 0.1s ease;
 }
 
-.row:last-child {
+.row-wrap:last-child {
 	border-bottom: none;
+}
+
+/*
+ * The row is a <button>: it expands, so it has to be reachable and operable
+ * from the keyboard, and a real button gets that from the platform instead of
+ * from a pile of role/tabindex/onKeyDown. Everything below undoes the UA
+ * button styling.
+ */
+.row {
+	display: grid;
+	grid-template-columns: 92px 74px minmax(0, 1fr) 118px 118px 96px 14px;
+	align-items: center;
+	gap: 12px;
+	width: 100%;
+	padding: 9px 12px 9px 11px;
+	border: none;
+	border-left: 3px solid transparent;
+	background: transparent;
+	text-align: left;
+	cursor: pointer;
+	transition: background 0.1s ease, border-color 0.1s ease;
 }
 
 .row:hover {
@@ -414,6 +1024,27 @@ header.site .tag {
 
 .row.kind-earnings {
 	border-left-color: var(--earnings);
+}
+
+.row.is-open {
+	background: var(--panel-hover);
+}
+
+.row-caret {
+	justify-self: end;
+	color: var(--dim);
+	font-size: 14px;
+	line-height: 1;
+	transition: transform 0.15s ease, color 0.15s ease;
+}
+
+.row:hover .row-caret {
+	color: var(--text);
+}
+
+.row.is-open .row-caret {
+	transform: rotate(90deg);
+	color: var(--medium);
 }
 
 .cell-time {
@@ -549,13 +1180,493 @@ header.site .tag {
 	border-color: rgba(95, 191, 119, 0.26);
 }
 
-.day-empty {
-	padding: 9px 14px;
+/* ---------------------------- Expanded row ------------------------------- */
+
+.row-detail {
+	padding: 2px 14px 16px 16px;
+	background: var(--panel-alt);
+	border-left: 3px solid var(--medium);
+	animation: unfurl 0.16s ease-out;
+}
+
+@keyframes unfurl {
+	from {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+.rd-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+	gap: 18px;
+	padding-top: 12px;
+}
+
+.rd-block h4 {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin: 0 0 6px;
+	font-size: 9.5px;
+	font-weight: 700;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	color: var(--medium);
+}
+
+.rd-count {
+	font-size: 9px;
+	color: var(--dim);
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	padding: 0 5px;
+}
+
+.rd-block p {
+	margin: 0 0 6px;
 	font-size: 12px;
+	line-height: 1.55;
+	color: var(--muted);
+}
+
+.rd-note {
+	color: var(--dim) !important;
+	font-size: 11.5px !important;
+}
+
+.rd-link {
+	display: inline-block;
+	margin-top: 2px;
+	font-size: 10px;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--macro);
+	border-bottom: 1px solid rgba(74, 157, 224, 0.35);
+}
+
+.rd-link:hover {
+	color: #7bbcf0;
+}
+
+.rd-news {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	gap: 8px;
+}
+
+.rd-news a {
+	display: block;
+	font-size: 12px;
+	line-height: 1.4;
+	color: var(--text);
+}
+
+.rd-news a:hover {
+	color: var(--medium);
+}
+
+.rd-news-meta {
+	display: block;
+	margin-top: 2px;
+	font-size: 9.5px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
 	color: var(--dim);
 }
 
-/* --------------------------------- Footer --------------------------------- */
+/* =============================== News desk ================================ */
+
+/*
+ * Two windows above the calendar: the lead story, and everything that just
+ * landed. They replaced a 328px side rail - the calendar's row grid is seven
+ * columns wide and wanted the space back, and one scrolling list could not
+ * make the distinction between "the thing that matters" and "the newest
+ * thing", which is the distinction a news desk exists to make.
+ *
+ * Hot Story gets the wider column because it carries a summary and its
+ * reasoning; Latest is a scan list and reads better narrow.
+ */
+.desk {
+	display: grid;
+	grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+	gap: 12px;
+	margin-bottom: 16px;
+}
+
+.win {
+	display: flex;
+	flex-direction: column;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--panel);
+	overflow: hidden;
+}
+
+.win-head {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 12px;
+	background: var(--panel-alt);
+	border-bottom: 1px solid var(--border);
+	flex: none;
+}
+
+.win-head h2 {
+	display: flex;
+	align-items: baseline;
+	gap: 7px;
+	margin: 0;
+	font-size: 12.5px;
+	font-weight: 650;
+}
+
+/*
+ * The "News /" kicker is the one piece of chrome borrowed wholesale from a
+ * forex board's panel headers. It works because it names the section once and
+ * lets the two window titles be short.
+ */
+.win-kicker {
+	font-size: 9px;
+	font-weight: 700;
+	letter-spacing: 0.16em;
+	text-transform: uppercase;
+	color: var(--dim);
+}
+
+.win-kicker::after {
+	content: ' /';
+	color: var(--border);
+}
+
+.win-note {
+	margin-left: auto;
+	font-size: 9.5px;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--dim);
+	border: 1px dashed var(--border);
+	border-radius: 3px;
+	padding: 1px 6px;
+	cursor: help;
+}
+
+.win-refresh {
+	border: 1px solid var(--border);
+	background: transparent;
+	color: var(--dim);
+	width: 24px;
+	height: 22px;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 12px;
+	line-height: 1;
+	transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.win-refresh:hover:not(:disabled) {
+	color: var(--text);
+	border-color: var(--muted);
+}
+
+.win-refresh:disabled {
+	cursor: default;
+	opacity: 0.5;
+}
+
+.live {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	margin-left: auto;
+	font-size: 8.5px;
+	font-weight: 700;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	color: var(--earnings);
+	border: 1px solid rgba(95, 191, 119, 0.3);
+	border-radius: 3px;
+	padding: 1px 5px;
+}
+
+.live i {
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: currentColor;
+	animation: pulse 2.4s ease-in-out infinite;
+}
+
+.live.is-busy {
+	color: var(--medium);
+	border-color: rgba(255, 176, 32, 0.35);
+}
+
+@keyframes pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.2;
+	}
+}
+
+/* -------------------------------- hot story ------------------------------- */
+
+.hot {
+	padding: 13px 14px 14px;
+	/* A quiet warm wash so the lead reads as the lead without a coloured
+	   border competing with the impact scale. */
+	background: linear-gradient(
+		180deg,
+		rgba(255, 176, 32, 0.05),
+		transparent 70%
+	);
+}
+
+.hot-title {
+	display: block;
+	margin-top: 3px;
+	font-size: 17px;
+	font-weight: 650;
+	line-height: 1.28;
+	letter-spacing: -0.012em;
+	color: var(--text);
+	transition: color 0.12s ease;
+}
+
+.hot-title:hover {
+	color: var(--medium);
+}
+
+.hot-sum {
+	margin: 7px 0 0;
+	font-size: 12px;
+	line-height: 1.5;
+	color: var(--muted);
+	display: -webkit-box;
+	-webkit-line-clamp: 3;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+/*
+ * Why this story leads, printed rather than asserted. Same job as the source
+ * stamp on a calendar row: the editorial call is the claim, so it shows its
+ * working.
+ */
+.hot-why {
+	margin: 10px 0 0;
+	padding: 8px 10px;
+	list-style: none;
+	border-left: 2px solid rgba(255, 176, 32, 0.4);
+	background: var(--panel-alt);
+	border-radius: 0 3px 3px 0;
+	display: grid;
+	gap: 3px;
+}
+
+.hot-why li {
+	font-size: 10.5px;
+	line-height: 1.45;
+	color: var(--dim);
+	position: relative;
+	padding-left: 11px;
+}
+
+.hot-why li::before {
+	content: '\203A';
+	position: absolute;
+	left: 0;
+	color: var(--medium);
+}
+
+/* ------------------------------ latest stories ---------------------------- */
+
+.win-topics {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	padding: 8px 12px;
+	border-bottom: 1px solid var(--border-soft);
+	flex: none;
+}
+
+.tchip {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding: 3px 7px;
+	font-size: 10.5px;
+	border: 1px solid var(--border);
+	border-radius: 3px;
+	background: transparent;
+	color: var(--muted);
+	cursor: pointer;
+	transition: all 0.12s ease;
+}
+
+.tchip:hover {
+	color: var(--text);
+	border-color: var(--muted);
+}
+
+.tchip.on {
+	color: #0b0e11;
+	background: var(--medium);
+	border-color: var(--medium);
+	font-weight: 600;
+}
+
+.tchip-n {
+	font-size: 9px;
+	color: var(--dim);
+}
+
+.tchip.on .tchip-n {
+	color: rgba(11, 14, 17, 0.65);
+}
+
+.win-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	overflow-y: auto;
+	flex: 1 1 auto;
+	max-height: 340px;
+	scrollbar-width: thin;
+	scrollbar-color: var(--border) transparent;
+}
+
+.nitem {
+	padding: 9px 12px;
+	border-bottom: 1px solid var(--border-soft);
+	border-left: 2px solid transparent;
+	transition: background 0.12s ease;
+}
+
+.nitem:hover {
+	background: var(--panel-alt);
+}
+
+/*
+ * Issuer vs wire is carried by the left edge and the stamp border, not by a
+ * third hue. See the header note: two colour axes is the budget.
+ */
+.nitem.tier-primary {
+	border-left-color: var(--macro);
+}
+
+.nitem-meta {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 4px;
+}
+
+.stamp.src-news-primary {
+	color: #6f8fa8;
+	border-style: solid;
+	border-color: rgba(74, 157, 224, 0.35);
+}
+
+.stamp.src-news-wire {
+	color: var(--dim);
+	border-style: dashed;
+}
+
+.nitem-badge {
+	font-size: 8.5px;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	color: var(--macro);
+}
+
+.nitem-when {
+	margin-left: auto;
+	font-size: 9.5px;
+	color: var(--dim);
+	white-space: nowrap;
+}
+
+.nitem-title {
+	display: block;
+	font-size: 12.5px;
+	line-height: 1.38;
+	color: var(--text);
+	transition: color 0.12s ease;
+}
+
+.nitem-title:hover {
+	color: var(--medium);
+}
+
+.nitem-tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin-top: 6px;
+}
+
+.ntag {
+	padding: 1px 6px;
+	font-size: 9.5px;
+	letter-spacing: 0.05em;
+	border: 1px solid var(--border);
+	border-radius: 2px;
+	background: transparent;
+	color: var(--muted);
+	cursor: pointer;
+	transition: all 0.12s ease;
+}
+
+.ntag:hover {
+	color: var(--text);
+	border-color: var(--muted);
+}
+
+.ntag.on {
+	color: #0b0e11;
+	background: var(--medium);
+	border-color: var(--medium);
+	font-weight: 600;
+}
+
+.ntag.is-sym {
+	color: var(--earnings);
+	border-color: rgba(95, 191, 119, 0.3);
+}
+
+.ntag.is-sym.on {
+	background: var(--earnings);
+	border-color: var(--earnings);
+	color: #0b0e11;
+}
+
+.win-empty,
+.win-foot {
+	margin: 0;
+	padding: 10px 12px;
+	font-size: 10.5px;
+	line-height: 1.5;
+	color: var(--dim);
+	border-top: 1px solid var(--border-soft);
+	flex: none;
+}
+
+.win-warn {
+	color: var(--medium);
+}
+
+/* ================================= Footer ================================= */
 
 footer.site {
 	margin-top: 26px;
@@ -572,6 +1683,13 @@ footer.site strong {
 	font-weight: 600;
 }
 
+footer.site .mono {
+	color: var(--muted);
+	border: 1px solid var(--border);
+	border-radius: 3px;
+	padding: 0 4px;
+}
+
 .notice {
 	border: 1px solid var(--border);
 	border-left: 3px solid var(--medium);
@@ -583,14 +1701,30 @@ footer.site strong {
 	margin-bottom: 14px;
 }
 
-/* ------------------------------- Responsive -------------------------------- */
+/* =============================== Responsive =============================== */
+
+@media (max-width: 900px) {
+	/* Two windows side by side stop working well before the calendar does:
+	   a headline needs more horizontal room than a table row. */
+	.desk {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.win-list {
+		max-height: 280px;
+	}
+
+	.hot-title {
+		font-size: 15.5px;
+	}
+}
 
 @media (max-width: 860px) {
 	.row {
-		grid-template-columns: 78px 66px minmax(0, 1fr);
+		grid-template-columns: 78px 66px minmax(0, 1fr) 14px;
 		grid-template-areas:
-			'time impact event'
-			'time stamp   nums';
+			'time impact event caret'
+			'time stamp   nums  caret';
 		row-gap: 4px;
 	}
 
@@ -617,13 +1751,82 @@ footer.site strong {
 		justify-self: start;
 	}
 
+	.row-caret {
+		grid-area: caret;
+	}
+
 	.legend {
 		display: none;
+	}
+
+	.bw-status {
+		min-width: 0;
+		padding: 6px 10px;
+	}
+
+	.bw-time {
+		display: none;
+	}
+
+	.bw-label {
+		display: none;
+	}
+
+	.band-stats {
+		gap: 16px;
+	}
+
+	.filters {
+		position: static;
 	}
 }
 
 @media (min-width: 861px) {
 	.nums {
 		display: contents;
+	}
+}
+
+/*
+ * A scrolling strip is exactly the thing a motion-sensitivity setting is
+ * about. With reduced motion the marquee stops entirely and becomes a
+ * horizontally scrollable list — same information, under the reader's own
+ * control — and the pulses hold still.
+ */
+@media (prefers-reduced-motion: reduce) {
+	.mq {
+		overflow-x: auto;
+		scrollbar-width: none;
+	}
+
+	.mq::-webkit-scrollbar {
+		display: none;
+	}
+
+	.mq-track {
+		animation: none;
+	}
+
+	.mq-run:nth-child(2) {
+		display: none;
+	}
+
+	.mq-toggle {
+		display: none;
+	}
+
+	.live i,
+	.mq-label-dot,
+	.bw-beacon,
+	.bw.phase-open .bw-beacon {
+		animation: none;
+	}
+
+	.row-detail {
+		animation: none;
+	}
+
+	* {
+		transition-duration: 0.01ms !important;
 	}
 }

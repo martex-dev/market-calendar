@@ -1,6 +1,6 @@
 'use client';
 
-import { useSyncExternalStore } from 'react';
+import { useIsClient } from '@/lib/client-hooks';
 import { formatEventTime, type TimeMode } from '@/lib/time';
 
 /**
@@ -8,21 +8,13 @@ import { formatEventTime, type TimeMode } from '@/lib/time';
  *
  * Local time can only be resolved in the browser — the server has no idea
  * what zone the viewer is in, so server-rendering 'local' would bake in the
- * server's zone and then mismatch on hydration.
- *
- * useSyncExternalStore is the clean way to express "this value differs
- * between server and client": it takes an explicit server snapshot (false)
- * and client snapshot (true), so React renders ET on the server and during
- * hydration, then switches to local on the client without a mismatch and
- * without setState-in-an-effect. The store never actually changes, so the
- * subscribe callback is a no-op.
+ * server's zone and then mismatch on hydration. useIsClient (see
+ * src/lib/client-hooks.ts) expresses exactly that: an explicit server
+ * snapshot of false, a client snapshot of true, so React renders ET during
+ * SSR and hydration and switches to local afterwards.
  *
  * If JS never runs, the viewer still gets correct ET times.
  */
-const subscribe = () => () => {};
-const getClientSnapshot = () => true;
-const getServerSnapshot = () => false;
-
 export default function EventTime({
 	date,
 	etMinutes,
@@ -32,11 +24,7 @@ export default function EventTime({
 	etMinutes: number | null;
 	mode: TimeMode;
 }) {
-	const isClient = useSyncExternalStore(
-		subscribe,
-		getClientSnapshot,
-		getServerSnapshot,
-	);
+	const isClient = useIsClient();
 
 	return (
 		<span className='time'>

@@ -150,3 +150,54 @@ export function formatDayHeading(dateKey: string): string {
 		day: 'numeric',
 	}).format(new Date(Date.UTC(y, m - 1, d, 12)));
 }
+
+/**
+ * Compact "how long ago" for news timestamps.
+ *
+ * Deliberately coarse and deliberately not localised: it sits next to
+ * monospace clock times in a dense strip, so "4h" has to stay two or three
+ * characters wide. Intl.RelativeTimeFormat would give "4 hours ago", which is
+ * correct and four times too long for the space.
+ */
+export function timeAgo(iso: string, now: Date = new Date()): string {
+	const then = Date.parse(iso);
+	if (!Number.isFinite(then)) return '';
+
+	const secs = Math.max(0, Math.round((now.getTime() - then) / 1000));
+	if (secs < 90) return 'just now';
+
+	const mins = Math.round(secs / 60);
+	if (mins < 60) return `${mins}m ago`;
+
+	const hours = Math.round(mins / 60);
+	if (hours < 24) return `${hours}h ago`;
+
+	const days = Math.round(hours / 24);
+	if (days < 7) return `${days}d ago`;
+
+	return `${Math.round(days / 7)}w ago`;
+}
+
+/**
+ * Whole days between two YYYY-MM-DD keys.
+ *
+ * Plain-date arithmetic via UTC noon, the same trick addDays uses, so a DST
+ * boundary inside the span cannot round the answer to 0 or 2.
+ */
+export function daysBetween(fromKey: string, toKey: string): number {
+	const at = (k: string) => {
+		const [y, m, d] = k.split('-').map(Number);
+		return Date.UTC(y, m - 1, d, 12);
+	};
+	return Math.round((at(toKey) - at(fromKey)) / 86_400_000);
+}
+
+/** "today" / "tomorrow" / "in 3d" / "in 2w", for countdown badges. */
+export function relativeDays(days: number): string {
+	if (days < 0) return `${-days}d ago`;
+	if (days === 0) return 'today';
+	if (days === 1) return 'tomorrow';
+	if (days < 7) return `in ${days}d`;
+	if (days < 28) return `in ${Math.round(days / 7)}w`;
+	return `in ${Math.round(days / 30)}mo`;
+}

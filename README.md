@@ -3,7 +3,9 @@
 **Live:** https://market-calendar-three.vercel.app
 
 One day-by-day calendar of everything that could move US stocks: macro
-releases and index-constituent earnings, merged into a single ranked list.
+releases and index-constituent earnings, merged into a single ranked list —
+under a live quote board of the names that lead the market, and two news
+windows tagged back to the rows they are about.
 
 See `CLAUDE.md` for scope and the reasoning behind it. This file is setup.
 
@@ -39,6 +41,56 @@ Three independent sources, merged into one `events` table:
 | federalreserve.gov | FOMC decision dates (hand-maintained) | `src/lib/fomc.ts` |
 | NASDAQ calendar API | Earnings, filtered to S&P 500 + Nasdaq-100 | `src/lib/earnings/` |
 
+### The Bellwethers board
+
+The top strip is the equity answer to a forex terminal's "Majors" row. Eleven
+instruments, hand-picked with a stated reason each in
+`src/lib/quotes/bellwethers.ts`: four index trackers and the seven largest
+index weights.
+
+Quotes come from `api.nasdaq.com/api/quote` — the same host the earnings
+calendar already uses, through the same client. That was not a free choice:
+Yahoo's quote endpoint now 401s without a crumb and Stooq is end-of-day, while
+NASDAQ returns a real-time last sale, both sessions, and the exchange's own
+market status. It also means the market-status pill is authoritative rather
+than derived from the clock, so it is right on holidays.
+
+**Index tiles are tracking ETFs, and are labelled as such.** NASDAQ's quote
+API only carries its own indices — `SPX`, `INDU`, `RUT` and `VIX` all return
+"Symbol not exists", and `COMP`/`NDX` come back end-of-day. SPY, QQQ, DIA and
+IWM quote live on the same endpoint. A row that said "S&P 500" and moved once
+a day would be worse than one that says SPY and is current.
+
+Like news, quotes are **not** in the database: a 60-second request-path cache,
+refreshed by the client. Prices are the one thing here that changes faster
+than the nightly cron.
+
+### News
+
+News is the exception too — it does **not** go in the database. Six public RSS
+feeds (`src/lib/news/feeds.ts`) are read on the request path and cached by
+Next's Data Cache for 10 minutes, because the once-daily Hobby cron that suits
+a release calendar would serve yesterday's headlines all day. Three are the
+issuing agencies themselves (Federal Reserve, BEA, Census) and three are wires
+(CNBC Economy, CNBC Finance, MarketWatch); the UI stamps those two tiers apart.
+
+The two windows above the calendar are **Hot Story** and **Latest Stories**.
+The lead is chosen by a fixed weighted sum in `src/lib/news/rank.ts` — topic
+weight, whether the issuing agency published it, how many outlets are covering
+the subject, and a 12-hour recency half-life — and the panel prints the
+reasons it won. Nothing is learned or tuned; it is a small table you can read.
+That ranking rule is *not* the same thing as an impact tag: `CLAUDE.md` fixes
+event impact to a per-type lookup because scheduled events have types to look
+up, whereas every headline is unique and ordering them needs a rule that reads
+the item.
+
+Every headline is tagged back to the calendar by `src/lib/news/topics.ts`:
+keyword match onto the macro release families, plus a company-name match
+against the earnings rows currently loaded. Wire items matching neither are
+dropped — that gate is what keeps personal-finance columns out of a market
+calendar. Both passes are fixed string tables with no scoring, for the same
+reason impact tags are.
+
 The FRED and NASDAQ clients share nothing but `src/lib/types.ts`, per
 `CLAUDE.md`. Impact tags live in `src/lib/impact.ts` with a cited rationale
 per event type, so classifications can be reviewed without reading fetch code.
@@ -62,6 +114,14 @@ These are deliberate, not oversights:
   row. Forward-looking rows — the ones that matter — do have times.
 - **The FOMC date table is hand-maintained** and currently runs to Dec 2027.
   The refresh job warns when it is within 90 days of running out.
+- **Two mega-caps can have no jump target.** A tile navigates to the week that
+  company reports, but the database only holds a -30/+90 day window, so a name
+  reporting outside it (GOOGL and TSLA, from late August) filters the calendar
+  without navigating. Widening `WINDOW_FORWARD_DAYS` is the lever.
+- **News feed choice is editorial.** `src/lib/news/feeds.ts` states why each
+  of the six is in the list. MarketWatch's MarketPulse feed looks like the
+  better fit than Top Stories by name but is stale — checked 2026-08-28, its
+  newest item was from July 2025.
 
 ## Deploying to Vercel
 
@@ -83,8 +143,31 @@ timing is only guaranteed within the hour, and functions cap at **60 seconds**.
 A full refresh measured ~2s for 87 requests, so there is plenty of headroom —
 `WINDOW_FORWARD_DAYS` in `src/lib/refresh.ts` is the lever if that changes.
 
+## Using it
+
+- Rows expand. Click any one for its impact rationale verbatim from
+  `src/lib/impact.ts`, what the source can and cannot tell you, a link to the
+  issuing agency, and any headlines about that release.
+- All three surfaces share one filter state (`FilterContext`). A topic chip
+  filters the news windows *and* the calendar; a ticker chip — on a headline
+  or on a mega-cap quote tile — jumps to the week that company reports and
+  filters the calendar to it. Index tiles are deliberately not clickable:
+  there is no SPY row on this calendar, so filtering to it could only empty
+  the page.
+- Keys: `←` `→` step the range, `t` today, `w` / `d` switch view, `/` filter,
+  `Esc` clear.
+- The top rail scrolls continuously and pauses on hover or via its button.
+  Under `prefers-reduced-motion` it stops entirely and becomes a scrollable
+  list instead.
+
 ## Notes
 
 - `AGENTS.md` is generated and re-added by `next dev`; deleting it just
   recreates it.
+- `npm run artifact` emits a single shareable HTML file that inlines
+  `globals.css` and reproduces the same DOM the React components render, so
+  restyling the app restyles the artifact. It carries a frozen snapshot of the
+  events, the headlines and the quotes. The clock and countdown still run,
+  because those are computed from the viewer's own clock — prices cannot be,
+  so the board is stamped "frozen" and its beacon does not pulse.
 - Conventions: tabs, single quotes.

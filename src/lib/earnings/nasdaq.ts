@@ -27,6 +27,14 @@ const NASDAQ_BASE = 'https://api.nasdaq.com/api';
  * verified: with curl's default UA the connection fails at the transport
  * level (no HTTP status at all), not with a 403. This header is load-bearing,
  * not decoration. Do not remove it.
+ *
+ * Re-verified 2026-08-28, the hard way. The quotes client was written with its
+ * own polite agent ('Mozilla/5.0 (compatible; MarketCalendar/1.0; +url)') and
+ * worked for a few minutes before every request began hanging until it timed
+ * out, while this exact header answered the same endpoint in 190ms. A
+ * "compatible"-style token is not enough; it wants a real browser UA. That is
+ * why every api.nasdaq.com call in this codebase goes through this one
+ * function instead of each caller rolling its own headers.
  */
 const BROWSER_HEADERS: Record<string, string> = {
 	'user-agent':
@@ -46,27 +54,48 @@ export class NasdaqError extends Error {
 	}
 }
 
+export interface NasdaqGetOptions {
+	/**
+	 * Seconds to keep the response in Next's Data Cache.
+	 *
+	 * Omitted for the refresh job, which owns caching via our own database and
+	 * must never read a stale fetch layer. Set by the quotes client, which runs
+	 * on the request path and does want a short shared cache.
+	 */
+	revalidateSeconds?: number;
+	/** Default 20s, which suits the slow calendar endpoint. */
+	timeoutMs?: number;
+	/** Default 3. Set to 1 on the request path, where a retry storm costs
+	 *  the viewer latency they can see. */
+	maxAttempts?: number;
+}
+
 /** Shared low-level GET for every api.nasdaq.com call. */
 export async function nasdaqGet<T>(
 	path: string,
 	params: Record<string, string> = {},
+	options: NasdaqGetOptions = {},
 	attempt = 1,
 ): Promise<T> {
 	const url = new URL(`${NASDAQ_BASE}/${path}`);
 	for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
 
+	const maxAttempts = options.maxAttempts ?? 3;
+
 	let res: Response;
 	try {
 		res = await fetch(url, {
-			cache: 'no-store',
+			...(options.revalidateSeconds === undefined
+				? { cache: 'no-store' as const }
+				: { next: { revalidate: options.revalidateSeconds } }),
 			headers: BROWSER_HEADERS,
-			signal: AbortSignal.timeout(20_000),
+			signal: AbortSignal.timeout(options.timeoutMs ?? 20_000),
 		});
 	} catch (err) {
 		// Transport-level failure, which is also how a missing UA presents.
-		if (attempt < 3) {
+		if (attempt < maxAttempts) {
 			await sleep(attempt * 750);
-			return nasdaqGet<T>(path, params, attempt + 1);
+			return nasdaqGet<T>(path, params, options, attempt + 1);
 		}
 		throw new NasdaqError(
 			`NASDAQ request failed after ${attempt} attempts: ${String(err)}`,
@@ -75,9 +104,9 @@ export async function nasdaqGet<T>(
 	}
 
 	if (res.status === 429 || res.status >= 500) {
-		if (attempt < 3) {
+		if (attempt < maxAttempts) {
 			await sleep(attempt * 1500);
-			return nasdaqGet<T>(path, params, attempt + 1);
+			return nasdaqGet<T>(path, params, options, attempt + 1);
 		}
 		throw new NasdaqError(`NASDAQ returned ${res.status}`, res.status);
 	}
