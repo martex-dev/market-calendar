@@ -160,6 +160,16 @@ A full refresh measured ~2s for 87 requests, so there is plenty of headroom —
   Under `prefers-reduced-motion` it stops entirely and becomes a scrollable
   list instead.
 
+## JSON API
+
+`GET /api/events?start=YYYY-MM-DD&end=YYYY-MM-DD&kind=earnings|macro`
+returns `{ start, end, events }` with the same `MarketEvent` rows the pages
+render (ET dates, `etMinutes`, session, impact, forecast/previous). Both
+dates default (today, +6 days), `kind` is optional, and a request spans at
+most 120 days. It's unauthenticated and read-only, like `/api/news`, and
+cached for 5 minutes at the edge. Forge's Trade room uses it as an earnings
+source; for that, the deployment must not be behind Vercel Authentication.
+
 ## Notes
 
 - `AGENTS.md` is generated and re-added by `next dev`; deleting it just
